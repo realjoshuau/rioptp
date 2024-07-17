@@ -152,8 +152,8 @@ user_flags()
 kernel_flags()
 {
 	prefix=""
-	tstamp=/usr/include/linux/net_tstamp.h
-	ptp_clock=/usr/include/linux/ptp_clock.h
+	tstamp=/usr/local/arm-nilrt-linux-gnueabi/sysroot/usr/include/linux/net_tstamp.h
+	ptp_clock=/usr/local/arm-nilrt-linux-gnueabi/sysroot/usr/include/linux/ptp_clock.h
 
 	if [ "x$KBUILD_OUTPUT" != "x" ]; then
 		# With KBUILD_OUTPUT set, we are building against
@@ -167,7 +167,7 @@ kernel_flags()
 
 	if [ -f ${build}${tstamp} ]; then
 		prefix=${build}
-		printf " -I%s/usr/include" $prefix
+		printf " -I%s/usr/local/arm-nilrt-linux-gnueabi/sysroot/usr/include" $prefix
 	fi
 
 	if grep -q HWTSTAMP_TX_ONESTEP_SYNC ${prefix}${tstamp}; then
