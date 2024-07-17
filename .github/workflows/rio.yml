@@ -1,0 +1,32 @@
+name: rio
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  riobuild:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os:
+        - container: wpilib/roborio-cross-ubuntu:2024-22.04-py312
+          name: roborio
+
+    container:
+        image: "${{ matrix.os.container }}"
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: build
+      shell: bash
+      run: |
+        CROSS_COMPILE=arm-frc2024-linux-gnueabi- make
+
+    - uses: actions/upload-artifact@v3
+      with:
+        name: dist-${{ matrix.os.name }}
+        path: .
