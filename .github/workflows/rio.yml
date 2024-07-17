@@ -3,6 +3,7 @@ name: rio
 on:
   pull_request:
   push:
+  workflow_dispatch:
 
 jobs:
   riobuild:
