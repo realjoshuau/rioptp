@@ -33,6 +33,7 @@ struct ts2phc_nmea_pps_source {
 	pthread_t worker;
 	/* Protects anonymous struct fields, below, from concurrent access. */
 	pthread_mutex_t mutex;
+	tmv_t delay_correction;
 	struct {
 		struct timespec local_monotime;
 		struct timespec local_utctime;
@@ -186,10 +187,9 @@ static int ts2phc_nmea_pps_source_getppstime(struct ts2phc_pps_source *src,
 		pr_err("nmea: rmc time stamp stale");
 		return -1;
 	}
-	rmc = tmv_add(rmc, duration_since_rmc);
+
 	utc_time = tmv_to_nanoseconds(rmc);
 	utc_time /= (int64_t) 1000000000;
-	*ts = tmv_to_timespec(rmc);
 
 	result = lstab_utc2tai(m->lstab, utc_time, &tai_offset);
 	switch (result) {
@@ -206,6 +206,10 @@ static int ts2phc_nmea_pps_source_getppstime(struct ts2phc_pps_source *src,
 		pr_err("nmea: utc time stamp is ambiguous");
 		break;
 	}
+
+	rmc = tmv_add(rmc, duration_since_rmc);
+	rmc = tmv_add(rmc, m->delay_correction);
+	*ts = tmv_to_timespec(rmc);
 	ts->tv_sec += tai_offset;
 
 	return lstab_error;
@@ -232,6 +236,8 @@ struct ts2phc_pps_source *ts2phc_nmea_pps_source_create(struct ts2phc_private *p
 	s->pps_source.destroy = ts2phc_nmea_pps_source_destroy;
 	s->pps_source.getppstime = ts2phc_nmea_pps_source_getppstime;
 	s->config = priv->cfg;
+	s->delay_correction = nanoseconds_to_tmv(
+			 config_get_int(priv->cfg, NULL, "ts2phc.nmea_delay"));
 	pthread_mutex_init(&s->mutex, NULL);
 	err = pthread_create(&s->worker, NULL, monitor_nmea_status, s);
 	if (err) {

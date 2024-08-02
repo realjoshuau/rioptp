@@ -30,8 +30,7 @@ struct ts2phc_pps_sink {
 	struct ptp_pin_desc pin_desc;
 	unsigned int polarity;
 	tmv_t correction;
-	uint32_t ignore_lower;
-	uint32_t ignore_upper;
+	uint32_t pulsewidth;
 	struct ts2phc_clock *clock;
 };
 
@@ -153,8 +152,8 @@ static struct ts2phc_pps_sink *ts2phc_pps_sink_create(struct ts2phc_private *pri
 	struct config *cfg = priv->cfg;
 	struct ptp_extts_request extts;
 	struct ts2phc_pps_sink *sink;
-	int err, pulsewidth;
 	int32_t correction;
+	int err;
 
 	sink = calloc(1, sizeof(*sink));
 	if (!sink) {
@@ -174,10 +173,9 @@ static struct ts2phc_pps_sink *ts2phc_pps_sink_create(struct ts2phc_private *pri
 	correction = config_get_int(cfg, device, "ts2phc.extts_correction");
 	sink->correction = nanoseconds_to_tmv(correction);
 
-	pulsewidth = config_get_int(cfg, device, "ts2phc.pulsewidth");
-	pulsewidth /= 2;
-	sink->ignore_upper = 1000000000 - pulsewidth;
-	sink->ignore_lower = pulsewidth;
+	sink->pulsewidth = config_get_int(cfg, device, "ts2phc.pulsewidth");
+	if (sink->pulsewidth > 500000000)
+		sink->pulsewidth = 1000000000 - sink->pulsewidth;
 
 	sink->clock = ts2phc_clock_add(priv, device);
 	if (!sink->clock) {
@@ -246,12 +244,21 @@ static bool ts2phc_pps_sink_ignore(struct ts2phc_private *priv,
 				   struct timespec source_ts)
 {
 	tmv_t source_tmv = timespec_to_tmv(source_ts);
+	uint32_t ignore_lower, ignore_upper;
 
 	source_tmv = tmv_sub(source_tmv, priv->perout_phase);
 	source_ts = tmv_to_timespec(source_tmv);
 
-	return source_ts.tv_nsec > sink->ignore_lower &&
-	       source_ts.tv_nsec < sink->ignore_upper;
+	if (ts2phc_pps_source_get_type(priv->src) == TS2PHC_PPS_SOURCE_NMEA) {
+		ignore_upper = sink->pulsewidth;
+		ignore_lower = 0;
+	} else {
+		ignore_upper = 1000000000 - sink->pulsewidth / 2;
+		ignore_lower = sink->pulsewidth / 2;
+	}
+
+	return source_ts.tv_nsec > ignore_lower &&
+	       source_ts.tv_nsec < ignore_upper;
 }
 
 static enum extts_result ts2phc_pps_sink_event(struct ts2phc_private *priv,
@@ -275,21 +282,22 @@ static enum extts_result ts2phc_pps_sink_event(struct ts2phc_private *priv,
 		goto out;
 	}
 
-	err = ts2phc_pps_source_getppstime(priv->src, &source_ts);
-	if (err < 0) {
-		pr_debug("source ts not valid");
-		return 0;
-	}
+	if (sink->polarity == (PTP_RISING_EDGE | PTP_FALLING_EDGE)) {
+		err = ts2phc_pps_source_getppstime(priv->src, &source_ts);
+		if (err < 0) {
+			pr_debug("source ts not valid");
+			return 0;
+		}
 
-	if (sink->polarity == (PTP_RISING_EDGE | PTP_FALLING_EDGE) &&
-	    ts2phc_pps_sink_ignore(priv, sink, source_ts)) {
+		if (ts2phc_pps_sink_ignore(priv, sink, source_ts)) {
+			pr_debug("%s SKIP extts index %u at %lld.%09u src %" PRIi64 ".%ld",
+				 sink->name, event.index, event.t.sec,
+				 event.t.nsec, (int64_t)source_ts.tv_sec,
+				 source_ts.tv_nsec);
 
-		pr_debug("%s SKIP extts index %u at %lld.%09u src %" PRIi64 ".%ld",
-		 sink->name, event.index, event.t.sec, event.t.nsec,
-		 (int64_t) source_ts.tv_sec, source_ts.tv_nsec);
-
-		result = EXTTS_IGNORE;
-		goto out;
+			result = EXTTS_IGNORE;
+			goto out;
+		}
 	}
 
 out:
